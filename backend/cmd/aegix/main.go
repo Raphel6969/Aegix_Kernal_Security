@@ -145,11 +145,25 @@ func main() {
 		slog.Info("ℹ️  GROQ_API_KEY not set — LLM explain and chat use fallback responses")
 	}
 
+	promptGuard := detector.GetPromptGuardScorer(
+		cfg.GroqAPIKey,
+		cfg.PromptGuardModel,
+		cfg.PromptGuardTimeoutSeconds,
+		cfg.PromptGuardThreshold,
+		cfg.PromptGuardEnabled,
+	)
+	if promptGuard.IsEnabled() {
+		slog.Info("✅ Tier B.5 Prompt Guard configured", "model", cfg.PromptGuardModel, "threshold", cfg.PromptGuardThreshold)
+	} else {
+		slog.Info("ℹ️  Tier B.5 Prompt Guard running in heuristic fallback mode")
+	}
+
 	svc := server.Services{
 		Alerts:        alertManager,
 		Notifications: notifStore,
 		Email:         emailService,
 		Groq:          groqClient,
+		PromptGuard:   promptGuard,
 		DB:            cold,
 	}
 

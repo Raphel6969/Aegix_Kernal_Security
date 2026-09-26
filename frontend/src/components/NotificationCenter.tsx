@@ -72,17 +72,13 @@ export function NotificationCenter({ sessionToken }: NotificationCenterProps) {
 
   const refresh = useCallback(async () => {
     try {
-      const listUrl = withSession(new URL(`${API_URL}/api/notifications`));
+      const listUrl = withSession(new URL(`${API_URL}/notifications`));
       listUrl.searchParams.set('limit', '40');
-      const countUrl = withSession(new URL(`${API_URL}/api/notifications/unread-count`));
-      const [listRes, countRes] = await Promise.all([
-        fetch(listUrl.toString()),
-        fetch(countUrl.toString()),
-      ]);
-      if (listRes.ok) setNotifications(await listRes.json());
-      if (countRes.ok) {
-        const d = await countRes.json();
-        setUnread(d.count ?? 0);
+      const res = await fetch(listUrl.toString());
+      if (res.ok) {
+        const d = await res.json();
+        setNotifications(d.notifications ?? []);
+        setUnread(d.unread_count ?? 0);
       }
     } catch {
       /* backend offline */

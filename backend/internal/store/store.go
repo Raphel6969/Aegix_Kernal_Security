@@ -39,6 +39,9 @@ type HotStore interface {
 	// UpdateLLMExplanation persists the async Tier C LLM explanation.
 	UpdateLLMExplanation(eventID, explanation string) error
 
+	// UpdatePGResult persists the async Tier B.5 Prompt Guard verdict and optional synthesized explanation.
+	UpdatePGResult(eventID string, label string, confidence float64, tactic string, synthesizedExplanation string) error
+
 	// Clear deletes all events.  If sessionID is non-nil only that session
 	// is affected.
 	Clear(sessionID *string) error

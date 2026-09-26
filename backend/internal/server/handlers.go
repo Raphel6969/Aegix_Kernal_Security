@@ -39,6 +39,7 @@ type Services struct {
 	Notifications *notification.NotificationStore
 	Email         *notification.EmailService
 	Groq          *chat.GroqClient // used for both explain AND chat
+	PromptGuard   *detector.PromptGuardScorer
 	DB            store.ColdStore  // Used for User Management and Auth
 }
 
@@ -224,7 +225,34 @@ func (s *Server) handleAnalyzeLLMExplain(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// ── Escalation Gate (Tier B.5 Prompt Guard) ──────────────────────────────
+	// If Prompt Guard flags high-confidence malicious, return instant synthesized briefing
+	// without wasting 2-5s on Groq.
+	if s.svc.PromptGuard != nil && (req.Classification == "malicious" || req.RiskScore >= 60) {
+		dec := s.svc.PromptGuard.Score(req.Command, req.RiskScore, req.MatchedRules)
+		if dec.Label == "MALICIOUS" && dec.Confidence >= s.cfg.PromptGuardThreshold && dec.SynthesizedExplanation != "" {
+			writeJSON(w, http.StatusOK, map[string]string{
+				"llm_explanation": dec.SynthesizedExplanation,
+			})
+			return
+		}
+	}
+
 	explanation := s.groqExplain(req.Command, req.Classification, req.RiskScore, req.MatchedRules)
+	if strings.TrimSpace(explanation) == "" && s.svc.PromptGuard != nil {
+		dec := s.svc.PromptGuard.Score(req.Command, req.RiskScore, req.MatchedRules)
+		if dec.SynthesizedExplanation != "" {
+			explanation = dec.SynthesizedExplanation
+		}
+	}
+	if strings.TrimSpace(explanation) == "" {
+		rulesStr := "none"
+		if len(req.MatchedRules) > 0 {
+			rulesStr = strings.Join(req.MatchedRules, ", ")
+		}
+		explanation = fmt.Sprintf("⚠️ Threat Analysis [%s | Risk Score: %.1f/100]:\nCommand contains flagged patterns: %s.\nImmediate Action: Verify process authenticity and block unauthorized execution paths.",
+			strings.ToUpper(req.Classification), req.RiskScore, rulesStr)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"llm_explanation": explanation})
 }
 
@@ -328,12 +356,43 @@ func (s *Server) handleEventLLMExplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	regenerate := r.URL.Query().Get("regenerate") == "true"
+	if !regenerate && strings.TrimSpace(event.DetectionResult.LLMExplanation) != "" {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"event_id":        id,
+			"llm_explanation": event.DetectionResult.LLMExplanation,
+		})
+		return
+	}
+
+	// If already verified by Tier B.5 Prompt Guard with high confidence, use synthesized briefing unless user explicitly asked to regenerate
+	if !regenerate && event.DetectionResult.PGLabel == "MALICIOUS" && event.DetectionResult.PGConfidence >= s.cfg.PromptGuardThreshold && s.svc.PromptGuard != nil {
+		dec := s.svc.PromptGuard.Score(event.ExecveEvent.Command, event.DetectionResult.RiskScore, event.DetectionResult.MatchedRules)
+		if dec.SynthesizedExplanation != "" {
+			_ = s.hot.UpdateLLMExplanation(id, dec.SynthesizedExplanation)
+			event.DetectionResult.LLMExplanation = dec.SynthesizedExplanation
+			s.hub.BroadcastEvent(event)
+			writeJSON(w, http.StatusOK, map[string]string{
+				"event_id":        id,
+				"llm_explanation": dec.SynthesizedExplanation,
+			})
+			return
+		}
+	}
+
 	explanation := s.groqExplain(
 		event.ExecveEvent.Command,
 		event.DetectionResult.Classification,
 		event.DetectionResult.RiskScore,
 		event.DetectionResult.MatchedRules,
 	)
+
+	if strings.TrimSpace(explanation) == "" && s.svc.PromptGuard != nil {
+		dec := s.svc.PromptGuard.Score(event.ExecveEvent.Command, event.DetectionResult.RiskScore, event.DetectionResult.MatchedRules)
+		if dec.SynthesizedExplanation != "" {
+			explanation = dec.SynthesizedExplanation
+		}
+	}
 
 	// Persist and broadcast the updated event.
 	if err := s.hot.UpdateLLMExplanation(id, explanation); err != nil {
@@ -696,7 +755,7 @@ func (s *Server) buildAndStoreEvent(
 }
 
 // postProcess runs after every new event: WebSocket broadcast, alert dispatch,
-// and automatic notification creation.
+// automatic notification creation, and Tier B.5 async Prompt Guard enrichment.
 func (s *Server) postProcess(event *model.SecurityEvent) {
 	s.hub.BroadcastEvent(event)
 
@@ -707,6 +766,48 @@ func (s *Server) postProcess(event *model.SecurityEvent) {
 	if s.svc.Notifications != nil {
 		s.maybeCreateNotification(event)
 	}
+
+	// ── Tier B.5: Async Prompt Guard Enrichment ──────────────────────────────
+	// Fully non-blocking background goroutine to preserve sub-5ms sync API latency.
+	if s.svc.PromptGuard != nil {
+		go s.asyncPromptGuardEnrich(event)
+	}
+}
+
+// asyncPromptGuardEnrich executes Tier B.5 analysis in the background.
+// When complete, it updates SQLite and broadcasts the enriched event over WebSocket.
+func (s *Server) asyncPromptGuardEnrich(event *model.SecurityEvent) {
+	if s.svc.PromptGuard == nil || event == nil {
+		return
+	}
+
+	dec := s.svc.PromptGuard.Score(
+		event.ExecveEvent.Command,
+		event.DetectionResult.RiskScore,
+		event.DetectionResult.MatchedRules,
+	)
+
+	// Persist to hot cache
+	if err := s.hot.UpdatePGResult(
+		event.ID,
+		dec.Label,
+		dec.Confidence,
+		dec.MitreTactic,
+		dec.SynthesizedExplanation,
+	); err != nil {
+		slog.Debug("asyncPromptGuardEnrich: UpdatePGResult error", "err", err)
+	}
+
+	// Update the event fields
+	event.DetectionResult.PGLabel = dec.Label
+	event.DetectionResult.PGConfidence = dec.Confidence
+	event.DetectionResult.MitreTactic = dec.MitreTactic
+	if dec.SynthesizedExplanation != "" && event.DetectionResult.LLMExplanation == "" {
+		event.DetectionResult.LLMExplanation = dec.SynthesizedExplanation
+	}
+
+	// Re-broadcast enriched event so UI updates in real-time
+	s.hub.BroadcastEvent(event)
 }
 
 // maybeCreateNotification auto-creates a notification for suspicious/malicious events.

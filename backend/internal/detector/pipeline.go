@@ -134,6 +134,7 @@ func (p *Pipeline) Detect(command string, processMem, systemMem float64) *model.
 		Classification: classification,
 		MatchedRules:   matchedRules,
 		MLConfidence:   mlConfidence,
+		MitreTactic:    ResolveMitreTactic(command, matchedRules),
 		Explanation:    explanation,
 	}
 }

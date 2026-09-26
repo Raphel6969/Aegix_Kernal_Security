@@ -21,7 +21,7 @@ import (
 
 const (
 	groqEndpoint  = "https://api.groq.com/openai/v1/chat/completions"
-	groqMaxTokens = 1500
+	groqMaxTokens = 4096
 )
 
 // ChatMessage is one turn in a conversation.
@@ -43,7 +43,7 @@ type GroqClient struct {
 // If apiKey is empty, every call returns a graceful fallback — no panics.
 func NewGroqClient(apiKey, model string, timeoutSec int) *GroqClient {
 	if model == "" {
-		model = "llama-3.3-70b-versatile"
+		model = "openai/gpt-oss-20b"
 	}
 	if timeoutSec <= 0 {
 		timeoutSec = 30
@@ -62,7 +62,7 @@ func (g *GroqClient) IsConfigured() bool { return g.apiKey != "" }
 // ── Explanation ───────────────────────────────────────────────────────────────
 
 // Explain generates a natural-language explanation of why a command was
-// classified as it is.  Results are cached; identical command+class pairs
+// classified as it is. Results are cached; identical command+class pairs
 // never hit the network twice in the same process lifetime.
 func (g *GroqClient) Explain(
 	command, classification string,
@@ -75,15 +75,17 @@ func (g *GroqClient) Explain(
 
 	key := cacheKey(command, classification)
 	if cached, ok := g.cache.Load(key); ok {
-		return cached.(string), nil
+		if cachedStr, ok := cached.(string); ok && strings.TrimSpace(cachedStr) != "" {
+			return cachedStr, nil
+		}
 	}
 
 	prompt := buildExplainPrompt(command, classification, riskScore, matchedRules)
 	explanation, err := g.callAPI(groqSecuritySystemPrompt, []ChatMessage{
 		{Role: "user", Content: prompt},
 	})
-	if err != nil {
-		slog.Warn("groq: explain failed, using fallback", "err", err)
+	if err != nil || strings.TrimSpace(explanation) == "" {
+		slog.Warn("groq: explain failed or empty, using fallback", "err", err)
 		return fallbackExplanation(command, classification, riskScore, matchedRules), nil
 	}
 
@@ -94,7 +96,7 @@ func (g *GroqClient) Explain(
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
 // Chat sends a conversational message with full history to Groq and returns
-// the assistant's reply.  history should be ordered [oldest … newest],
+// the assistant's reply. history should be ordered [oldest … newest],
 // not including the current message.
 func (g *GroqClient) Chat(message string, history []ChatMessage) (string, error) {
 	if !g.IsConfigured() {
@@ -107,7 +109,7 @@ func (g *GroqClient) Chat(message string, history []ChatMessage) (string, error)
 	messages = append(messages, ChatMessage{Role: "user", Content: message})
 
 	response, err := g.callAPI(groqChatSystemPrompt, messages)
-	if err != nil {
+	if err != nil || strings.TrimSpace(response) == "" {
 		slog.Warn("groq: chat failed", "err", err)
 		return "I'm unable to connect to the AI service right now. Please try again shortly.", nil
 	}
@@ -116,7 +118,7 @@ func (g *GroqClient) Chat(message string, history []ChatMessage) (string, error)
 
 // ── Internal ──────────────────────────────────────────────────────────────────
 
-// callAPI sends a chat/completions request and returns the first choice content.
+// callAPI sends a chat/completions request and returns content (or reasoning as fallback).
 func (g *GroqClient) callAPI(systemPrompt string, messages []ChatMessage) (string, error) {
 	// Build the full messages array: system prompt first, then conversation.
 	type apiMsg struct {
@@ -157,7 +159,8 @@ func (g *GroqClient) callAPI(systemPrompt string, messages []ChatMessage) (strin
 	var result struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
@@ -165,7 +168,18 @@ func (g *GroqClient) callAPI(systemPrompt string, messages []ChatMessage) (strin
 		return "", fmt.Errorf("groq: unexpected response: %s", string(raw))
 	}
 
-	return strings.TrimSpace(result.Choices[0].Message.Content), nil
+	choice := result.Choices[0].Message
+	content := strings.TrimSpace(choice.Content)
+	if content == "" {
+		// Reasoning models like openai/gpt-oss-20b or deepseek store thinking in reasoning field
+		content = strings.TrimSpace(choice.Reasoning)
+	}
+
+	if content == "" {
+		return "", fmt.Errorf("groq: empty content and reasoning in response")
+	}
+
+	return content, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

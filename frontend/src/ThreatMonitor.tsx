@@ -3,7 +3,7 @@ import { API_URL } from './config';
 import { SeverityBadge } from './components/SeverityBadge';
 import { LlmExplainModal } from './components/LlmExplainModal';
 import { useLlmExplain } from './useLlmExplain';
-import { Search, Download, Trash2, X, Cpu, Brain, Sparkles } from 'lucide-react';
+import { Search, Download, Trash2, X, Cpu, Brain, Sparkles, ShieldCheck } from 'lucide-react';
 import type { SecurityEvent } from './useWebSocket';
 
 interface ThreatMonitorProps {
@@ -245,6 +245,12 @@ export function ThreatMonitor({ events, onFlush, sessionToken }: ThreatMonitorPr
                 selected.remediation_status
                   ? ['Remediation', selected.remediation_status.toUpperCase().replace(/_/g, ' ')]
                   : null,
+                selected.mitre_tactic
+                  ? ['MITRE ATT&CK', selected.mitre_tactic]
+                  : null,
+                selected.pg_label
+                  ? ['Tier B.5 Guard', `${selected.pg_label} (${((selected.pg_confidence ?? 0.95) * 100).toFixed(0)}%)`]
+                  : null,
               ].filter((item): item is [string, string] => item !== null).map(([k, v]) => (
                 <div key={k} className="threat-detail-meta__item">
                   <span>{k}</span>
@@ -263,7 +269,7 @@ export function ThreatMonitor({ events, onFlush, sessionToken }: ThreatMonitorPr
                       : 'No patterns matched'}
                   </span>
                 </div>
-                <span className="threat-tier__status">PROCESSING</span>
+                <span className="threat-tier__status">PASS</span>
               </div>
               <div className="threat-tier">
                 <Brain size={18} className="threat-tier__icon threat-tier__icon--orange" />
@@ -272,6 +278,20 @@ export function ThreatMonitor({ events, onFlush, sessionToken }: ThreatMonitorPr
                   <span>confidence {(selected.ml_confidence * 100).toFixed(1)}%</span>
                 </div>
                 <SeverityBadge classification={selected.classification} size="sm" />
+              </div>
+              <div className="threat-tier">
+                <ShieldCheck size={18} className="threat-tier__icon threat-tier__icon--cyan" />
+                <div>
+                  <strong>Tier B.5 — Semantic Guard</strong>
+                  <span>
+                    {selected.pg_label
+                      ? `${selected.pg_label} (${((selected.pg_confidence ?? 0.95) * 100).toFixed(0)}%) · Async`
+                      : 'Semantic decision layer active'}
+                  </span>
+                </div>
+                <span className="threat-tier__status" style={{ color: 'var(--neon-green)', borderColor: 'rgba(34,197,94,0.3)' }}>
+                  GATED
+                </span>
               </div>
             </div>
             {selected.explanation && (
@@ -284,7 +304,7 @@ export function ThreatMonitor({ events, onFlush, sessionToken }: ThreatMonitorPr
                 onClick={() => openLlmModal(false)}
               >
                 <Sparkles size={15} />
-                {llmText ?? selected.llm_explanation ? 'VIEW LLM ANALYSIS' : 'GENERATE LLM ANALYSIS'}
+                {llmText ?? selected.llm_explanation ? 'VIEW THREAT BRIEFING' : 'GENERATE THREAT BRIEFING'}
               </button>
             </div>
           </div>
@@ -297,6 +317,9 @@ export function ThreatMonitor({ events, onFlush, sessionToken }: ThreatMonitorPr
           onClose={() => setLlmModalOpen(false)}
           command={selected.command}
           classification={selected.classification}
+          mitreTactic={selected.mitre_tactic}
+          pgLabel={selected.pg_label}
+          pgConfidence={selected.pg_confidence}
           llmText={llmText ?? selected.llm_explanation ?? null}
           loading={llmLoading}
           error={llmError}

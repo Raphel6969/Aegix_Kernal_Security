@@ -11,6 +11,9 @@ interface AnalysisResult {
   risk_score: number;
   matched_rules: string[];
   ml_confidence: number;
+  pg_confidence?: number;
+  pg_label?: string;
+  mitre_tactic?: string;
   explanation: string;
 }
 
@@ -226,32 +229,44 @@ export function CommandSandbox() {
             </div>
           </div>
 
-          <div className="grid-2">
+          <div className="grid-2" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
             <div className="glass-card sandbox-tier-card">
               <div className="sandbox-tier-card__label">Tier A — Rules</div>
               <div className="sandbox-tier-card__value">
-                {result?.matched_rules[0] ?? '—'}
+                {result?.matched_rules[0] ?? 'Clean'}
               </div>
-              <div className="sandbox-tier-card__ms">0.60 MS</div>
+              <div className="sandbox-tier-card__ms">&lt; 1.0 MS</div>
             </div>
             <div className="glass-card sandbox-tier-card sandbox-tier-card--ml">
               <div className="sandbox-tier-card__label">Tier B — ML Scorer</div>
               <div className="sandbox-tier-card__value">
-                {result ? result.ml_confidence.toFixed(2) : '—'}
+                {result ? (result.ml_confidence * 100).toFixed(0) + '%' : '—'}
               </div>
-              <div className="sandbox-tier-card__ms">4.88 MS</div>
+              <div className="sandbox-tier-card__ms">~5.0 MS</div>
+            </div>
+            <div className="glass-card sandbox-tier-card" style={{ borderColor: 'rgba(34, 197, 94, 0.3)' }}>
+              <div className="sandbox-tier-card__label">Tier B.5 — MITRE / Guard</div>
+              <div className="sandbox-tier-card__value" style={{ fontSize: '0.78rem', color: 'var(--neon-green)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={result?.mitre_tactic}>
+                {result?.mitre_tactic ? result.mitre_tactic.split(' - ')[0] : 'Standard'}
+              </div>
+              <div className="sandbox-tier-card__ms" style={{ color: 'var(--neon-green)' }}>GATED</div>
             </div>
           </div>
 
           <div className="glass-card sandbox-explanation">
             <div className="sandbox-explanation__header">
               <Star size={16} style={{ color: 'var(--neon-cyan)' }} />
-              <strong>Tier A/B — Cascade Summary</strong>
+              <strong>Tier A/B/B.5 — Cascade Summary</strong>
             </div>
             <p>
               {result?.explanation ??
                 'Run an analysis to see the cascade verdict and explanation.'}
             </p>
+            {result?.mitre_tactic && (
+              <div style={{ marginTop: '6px', fontSize: '0.8rem', color: 'var(--neon-cyan)' }}>
+                <strong>MITRE ATT&CK:</strong> {result.mitre_tactic}
+              </div>
+            )}
             {result && (
               <button
                 type="button"
@@ -259,7 +274,7 @@ export function CommandSandbox() {
                 onClick={openLlmModal}
               >
                 <Sparkles size={15} />
-                {llmText ? 'VIEW LLM ANALYSIS' : 'GENERATE LLM ANALYSIS'}
+                {llmText ? 'VIEW THREAT BRIEFING' : 'GENERATE THREAT BRIEFING'}
               </button>
             )}
           </div>
@@ -272,6 +287,9 @@ export function CommandSandbox() {
           onClose={() => setLlmModalOpen(false)}
           command={result.command}
           classification={result.classification}
+          mitreTactic={result.mitre_tactic}
+          pgLabel={result.pg_label}
+          pgConfidence={result.pg_confidence}
           llmText={llmText}
           loading={llmLoading}
           error={llmError}

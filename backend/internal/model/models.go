@@ -32,6 +32,9 @@ type DetectionResult struct {
 	Classification string   `json:"classification"`  // "safe" | "suspicious" | "malicious"
 	MatchedRules   []string `json:"matched_rules"`
 	MLConfidence   float64  `json:"ml_confidence"`   // 0–1
+	PGConfidence   float64  `json:"pg_confidence"`   // 0–1 (Tier B.5 Prompt Guard confidence)
+	PGLabel        string   `json:"pg_label"`        // "MALICIOUS" | "BENIGN" | "SUSPICIOUS"
+	MitreTactic    string   `json:"mitre_tactic"`    // MITRE ATT&CK tactic e.g. "Execution (T1059.004)"
 	Explanation    string   `json:"explanation"`     // Tier A/B rule explanation
 	LLMExplanation string   `json:"llm_explanation"` // Tier C Groq explanation (async)
 }
@@ -65,6 +68,9 @@ func (e *SecurityEvent) Flatten() map[string]any {
 		"classification":        e.DetectionResult.Classification,
 		"matched_rules":         e.DetectionResult.MatchedRules,
 		"ml_confidence":         e.DetectionResult.MLConfidence,
+		"pg_confidence":         e.DetectionResult.PGConfidence,
+		"pg_label":              e.DetectionResult.PGLabel,
+		"mitre_tactic":          e.DetectionResult.MitreTactic,
 		"explanation":           e.DetectionResult.Explanation,
 		"llm_explanation":       e.DetectionResult.LLMExplanation,
 		"detected_at":           e.DetectedAt,

@@ -15,6 +15,9 @@ export interface SecurityEvent {
   classification: string;
   matched_rules: string[];
   ml_confidence: number;
+  pg_confidence?: number;
+  pg_label?: string;
+  mitre_tactic?: string;
   explanation?: string;
   llm_explanation?: string;
   detected_at: number;

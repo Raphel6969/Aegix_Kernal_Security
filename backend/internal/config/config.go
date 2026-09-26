@@ -58,6 +58,12 @@ type Settings struct {
 	GroqModel          string
 	GroqTimeoutSeconds int
 
+	// ── Prompt Guard (Tier B.5 async semantic decision layer) ────────────────
+	PromptGuardEnabled        bool
+	PromptGuardModel          string
+	PromptGuardTimeoutSeconds int
+	PromptGuardThreshold      float64
+
 	// ── Gemini (chatbot) ─────────────────────────────────────────────────────
 	GeminiAPIKey    string
 	GeminiChatModel string
@@ -120,6 +126,11 @@ func Load() *Settings {
 		GroqModel:          env("GROQ_MODEL", "llama-3.3-70b-versatile"),
 		GroqTimeoutSeconds: envInt("GROQ_TIMEOUT_SECONDS", 30),
 
+		PromptGuardEnabled:        envBool("PROMPT_GUARD_ENABLED", true),
+		PromptGuardModel:          env("PROMPT_GUARD_MODEL", "meta-llama/llama-prompt-guard-2-86m"),
+		PromptGuardTimeoutSeconds: envInt("PROMPT_GUARD_TIMEOUT_SECONDS", 3),
+		PromptGuardThreshold:      envFloat("PROMPT_GUARD_THRESHOLD", 0.90),
+
 		GeminiAPIKey:    env("GEMINI_API_KEY", ""),
 		GeminiChatModel: env("GEMINI_CHAT_MODEL", "gemini-flash-latest"),
 
@@ -178,6 +189,15 @@ func envBool(key string, fallback bool) bool {
 	if v := os.Getenv(key); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
+		}
+	}
+	return fallback
+}
+
+func envFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return fallback

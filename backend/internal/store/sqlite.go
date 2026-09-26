@@ -119,6 +119,9 @@ func (s *SQLiteStore) migrate() error {
 		`ALTER TABLE security_events ADD COLUMN session_id TEXT`,
 		`ALTER TABLE security_events ADD COLUMN remediation_action TEXT`,
 		`ALTER TABLE security_events ADD COLUMN remediation_status TEXT`,
+		`ALTER TABLE security_events ADD COLUMN pg_confidence REAL DEFAULT 0`,
+		`ALTER TABLE security_events ADD COLUMN pg_label TEXT DEFAULT ''`,
+		`ALTER TABLE security_events ADD COLUMN mitre_tactic TEXT DEFAULT ''`,
 	}
 	for _, stmt := range additions {
 		_, _ = s.db.Exec(stmt)
@@ -144,7 +147,8 @@ func (s *SQLiteStore) Append(event *model.SecurityEvent) error {
 			classification, risk_score, ml_confidence,
 			matched_rules, explanation, llm_explanation,
 			remediation_action, remediation_status,
-			process_memory_mb, system_memory_percent
+			process_memory_mb, system_memory_percent,
+			pg_confidence, pg_label, mitre_tactic
 		) VALUES (
 			?,?,?,?,
 			?,?,
@@ -154,6 +158,7 @@ func (s *SQLiteStore) Append(event *model.SecurityEvent) error {
 			?,?,?,
 			?,?,
 			?,?
+			?,?,?
 		)`,
 		rowID, event.ID,
 		event.ExecveEvent.AgentID, event.ExecveEvent.SessionID,
@@ -170,6 +175,9 @@ func (s *SQLiteStore) Append(event *model.SecurityEvent) error {
 		event.RemediationAction, event.RemediationStatus,
 		event.ExecveEvent.ProcessMemoryMB,
 		event.ExecveEvent.SystemMemoryPercent,
+		event.DetectionResult.PGConfidence,
+		event.DetectionResult.PGLabel,
+		event.DetectionResult.MitreTactic,
 	)
 	return err
 }
@@ -288,6 +296,25 @@ func (s *SQLiteStore) UpdateLLMExplanation(eventID, explanation string) error {
 	return err
 }
 
+// UpdatePGResult persists the async Tier B.5 Prompt Guard verdict and optional synthesized explanation.
+func (s *SQLiteStore) UpdatePGResult(eventID, label string, confidence float64, tactic string, synthesizedExplanation string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if synthesizedExplanation != "" {
+		_, err := s.db.Exec(
+			`UPDATE security_events SET pg_label=?, pg_confidence=?, mitre_tactic=?, llm_explanation=CASE WHEN llm_explanation='' OR llm_explanation IS NULL THEN ? ELSE llm_explanation END WHERE event_id=?`,
+			label, confidence, tactic, synthesizedExplanation, eventID,
+		)
+		return err
+	}
+	_, err := s.db.Exec(
+		`UPDATE security_events SET pg_label=?, pg_confidence=?, mitre_tactic=? WHERE event_id=?`,
+		label, confidence, tactic, eventID,
+	)
+	return err
+}
+
 // Clear deletes events. If sessionID is non-nil only that session is cleared.
 func (s *SQLiteStore) Clear(sessionID *string) error {
 	s.mu.Lock()
@@ -383,7 +410,8 @@ const selectCols = `
 	classification, risk_score, ml_confidence,
 	matched_rules, explanation, llm_explanation,
 	remediation_action, remediation_status,
-	process_memory_mb, system_memory_percent
+	process_memory_mb, system_memory_percent,
+	pg_confidence, pg_label, mitre_tactic
 `
 
 // buildWhere constructs a WHERE clause and argument list from optional filters.
@@ -435,6 +463,8 @@ func scanEvent(row *sql.Rows) (*model.SecurityEvent, error) {
 		llmExplanation       sql.NullString
 		remAction, remStatus sql.NullString
 		procMem, sysMem      float64
+		pgConf               float64
+		pgLabel, mitreTactic sql.NullString
 	)
 
 	err := row.Scan(
@@ -446,6 +476,7 @@ func scanEvent(row *sql.Rows) (*model.SecurityEvent, error) {
 		&matchedRulesJSON, &explanation, &llmExplanation,
 		&remAction, &remStatus,
 		&procMem, &sysMem,
+		&pgConf, &pgLabel, &mitreTactic,
 	)
 	if err != nil {
 		return nil, err
@@ -470,6 +501,9 @@ func scanEvent(row *sql.Rows) (*model.SecurityEvent, error) {
 			Classification: classification,
 			MatchedRules:   model.UnmarshalRules(matchedRulesJSON),
 			MLConfidence:   mlConf,
+			PGConfidence:   pgConf,
+			PGLabel:        pgLabel.String,
+			MitreTactic:    mitreTactic.String,
 			Explanation:    explanation,
 		},
 		DetectedAt: detectedAt,

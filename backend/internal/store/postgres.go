@@ -99,6 +99,10 @@ func (ps *PostgresStore) migrate(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS pg_idx_agent_ts
 			ON security_events(agent_id, timestamp DESC);
 
+		ALTER TABLE security_events ADD COLUMN IF NOT EXISTS pg_confidence DOUBLE PRECISION DEFAULT 0;
+		ALTER TABLE security_events ADD COLUMN IF NOT EXISTS pg_label TEXT DEFAULT '';
+		ALTER TABLE security_events ADD COLUMN IF NOT EXISTS mitre_tactic TEXT DEFAULT '';
+
 		CREATE TABLE IF NOT EXISTS users (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			email TEXT UNIQUE NOT NULL,
@@ -156,6 +160,9 @@ func (ps *PostgresStore) UpsertBatch(events []*model.SecurityEvent) error {
 			e.RemediationStatus,
 			e.ExecveEvent.ProcessMemoryMB,
 			e.ExecveEvent.SystemMemoryPercent,
+			e.DetectionResult.PGConfidence,
+			e.DetectionResult.PGLabel,
+			e.DetectionResult.MitreTactic,
 		})
 	}
 
@@ -168,6 +175,7 @@ func (ps *PostgresStore) UpsertBatch(events []*model.SecurityEvent) error {
 		"matched_rules", "explanation", "llm_explanation",
 		"remediation_action", "remediation_status",
 		"process_memory_mb", "system_memory_percent",
+		"pg_confidence", "pg_label", "mitre_tactic",
 	}
 
 	// pgx.CopyFrom does not support ON CONFLICT, so we use a temp table

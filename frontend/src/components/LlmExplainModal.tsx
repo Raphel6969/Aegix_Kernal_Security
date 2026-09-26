@@ -7,6 +7,9 @@ export interface LlmExplainModalProps {
   onClose: () => void;
   command?: string;
   classification?: string;
+  mitreTactic?: string;
+  pgLabel?: string;
+  pgConfidence?: number;
   llmText: string | null;
   loading: boolean;
   error: string;
@@ -34,6 +37,9 @@ export function LlmExplainModal({
   onClose,
   command,
   classification,
+  mitreTactic,
+  pgLabel,
+  pgConfidence,
   llmText,
   loading,
   error,
@@ -69,10 +75,10 @@ export function LlmExplainModal({
             <Brain size={22} style={{ color: 'var(--neon-cyan)' }} />
             <div>
               <h2 id="llm-modal-title" className="llm-modal__title">
-                Tier C — Groq Analysis
+                Tier C — AI Threat Briefing
               </h2>
               <p className="llm-modal__subtitle">
-                Detailed SOC briefing powered by Groq
+                Automated SOC analysis & defense guidance
               </p>
             </div>
           </div>
@@ -90,11 +96,23 @@ export function LlmExplainModal({
           <div className="llm-modal__command-block">
             <span className="llm-modal__command-label">Command under review</span>
             <code className="llm-modal__command">$ {command}</code>
-            {classification && (
-              <span className={`llm-modal__verdict llm-modal__verdict--${classification}`}>
-                {classification.toUpperCase()}
-              </span>
-            )}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+              {classification && (
+                <span className={`llm-modal__verdict llm-modal__verdict--${classification}`}>
+                  {classification.toUpperCase()}
+                </span>
+              )}
+              {mitreTactic && (
+                <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(0, 242, 254, 0.1)', color: 'var(--neon-cyan)', border: '1px solid rgba(0, 242, 254, 0.3)', fontWeight: 600 }}>
+                  MITRE: {mitreTactic}
+                </span>
+              )}
+              {pgLabel && (
+                <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(34, 197, 94, 0.1)', color: 'var(--neon-green)', border: '1px solid rgba(34, 197, 94, 0.3)', fontWeight: 600 }}>
+                  GUARD: {pgLabel} {pgConfidence !== undefined && pgConfidence > 0 ? `(${(pgConfidence * 100).toFixed(0)}%)` : ''}
+                </span>
+              )}
+            </div>
           </div>
         )}
 
