@@ -1,0 +1,68 @@
+services:
+  # ── API Gateway ──
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - aegix_net
+
+  # ── Frontend Server ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+    environment:
+      - VITE_API_URL=http://localhost/api
+    networks:
+      - aegix_net
+
+  # ── Backend Server ──
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_LOG_LEVEL=info
+      - FRONTEND_ORIGINS=http://localhost
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=super-secret-aegix-jwt-key
+      - GMAIL_USER=${GMAIL_USER}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    depends_on:
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    networks:
+      - aegix_net
+
+  # ── Hot Storage (In-Memory Cache) ──
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - aegix_net
+
+networks:
+  aegix_net:
+    driver: bridge
