@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -25,22 +26,50 @@ var (
 	oauthStateCookieName = "oauthstate"
 )
 
-func getOAuthConfig(provider string) (*oauth2.Config, error) {
-	callbackURL := "http://localhost/api/auth/" + provider + "/callback"
-	
+func getOAuthConfig(r *http.Request, provider string) (*oauth2.Config, error) {
+	// Dynamically determine callback URL based on environment or request headers
+	callbackURL := ""
+	if base := os.Getenv("RENDER_EXTERNAL_URL"); base != "" {
+		callbackURL = strings.TrimSuffix(base, "/") + "/api/auth/" + provider + "/callback"
+	} else if base := os.Getenv("BACKEND_URL"); base != "" && !strings.Contains(base, "localhost:8000") {
+		callbackURL = strings.TrimSuffix(base, "/") + "/api/auth/" + provider + "/callback"
+	} else if r != nil {
+		proto := "http"
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			proto = "https"
+		}
+		host := r.Host
+		if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
+			host = xfh
+		}
+		callbackURL = fmt.Sprintf("%s://%s/api/auth/%s/callback", proto, host, provider)
+	} else {
+		callbackURL = "http://localhost:8000/api/auth/" + provider + "/callback"
+	}
+
 	switch provider {
 	case "google":
+		clientID := os.Getenv("GOOGLE_CLIENT_ID")
+		clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+		if clientID == "" || clientSecret == "" {
+			return nil, fmt.Errorf("Google OAuth not configured: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required")
+		}
 		return &oauth2.Config{
-			ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
-			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
 			RedirectURL:  callbackURL,
 			Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
 			Endpoint:     google.Endpoint,
 		}, nil
 	case "github":
+		clientID := os.Getenv("GITHUB_CLIENT_ID")
+		clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
+		if clientID == "" || clientSecret == "" {
+			return nil, fmt.Errorf("GitHub OAuth not configured: GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required")
+		}
 		return &oauth2.Config{
-			ClientID:     os.Getenv("GITHUB_CLIENT_ID"),
-			ClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
 			RedirectURL:  callbackURL,
 			Scopes:       []string{"user:email"},
 			Endpoint:     github.Endpoint,
@@ -50,7 +79,7 @@ func getOAuthConfig(provider string) (*oauth2.Config, error) {
 	}
 }
 
-func generateStateOauthCookie(w http.ResponseWriter) string {
+func generateStateOauthCookie(w http.ResponseWriter, isHTTPS bool) string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	state := base64.URLEncoding.EncodeToString(b)
@@ -59,6 +88,8 @@ func generateStateOauthCookie(w http.ResponseWriter) string {
 		Value:    state,
 		Expires:  time.Now().Add(10 * time.Minute),
 		HttpOnly: true,
+		Secure:   isHTTPS,
+		SameSite: http.SameSiteLaxMode, // Lax required for cross-site OAuth redirects
 		Path:     "/",
 	}
 	http.SetCookie(w, &cookie)
@@ -67,20 +98,22 @@ func generateStateOauthCookie(w http.ResponseWriter) string {
 
 func (s *Server) handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 	provider := chi.URLParam(r, "provider")
-	conf, err := getOAuthConfig(provider)
+	conf, err := getOAuthConfig(r, provider)
 	if err != nil {
+		slog.Warn("OAuth login failed", "provider", provider, "err", err)
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	state := generateStateOauthCookie(w)
+	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	state := generateStateOauthCookie(w, isHTTPS)
 	url := conf.AuthCodeURL(state, oauth2.AccessTypeOffline)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
 func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	provider := chi.URLParam(r, "provider")
-	
+
 	// Validate state
 	stateCookie, err := r.Cookie(oauthStateCookieName)
 	if err != nil || r.FormValue("state") != stateCookie.Value {
@@ -88,7 +121,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conf, err := getOAuthConfig(provider)
+	conf, err := getOAuthConfig(r, provider)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -97,6 +130,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	token, err := conf.Exchange(context.Background(), code)
 	if err != nil {
+		slog.Error("OAuth token exchange failed", "provider", provider, "err", err)
 		writeErr(w, http.StatusInternalServerError, "failed to exchange token")
 		return
 	}
@@ -108,63 +142,68 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if provider == "google" {
 		resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to get user info")
+			writeErr(w, http.StatusInternalServerError, "failed to get google user info")
 			return
 		}
 		defer resp.Body.Close()
-		
-		var user struct {
-			Id    string `json:"id"`
+
+		var gUser struct {
+			ID    string `json:"id"`
 			Email string `json:"email"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to parse user info")
+		if err := json.NewDecoder(resp.Body).Decode(&gUser); err != nil {
+			writeErr(w, http.StatusInternalServerError, "failed to decode google user info")
 			return
 		}
-		email = user.Email
-		providerID = user.Id
+		email = gUser.Email
+		providerID = gUser.ID
 	} else if provider == "github" {
-		// Get User ID
 		resp, err := client.Get("https://api.github.com/user")
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to get github user")
+			writeErr(w, http.StatusInternalServerError, "failed to get github user info")
 			return
 		}
 		defer resp.Body.Close()
-		
+
 		var ghUser struct {
-			Id int64 `json:"id"`
+			ID    int64  `json:"id"`
+			Email string `json:"email"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&ghUser); err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to parse github user")
+			writeErr(w, http.StatusInternalServerError, "failed to decode github user info")
 			return
 		}
-		providerID = fmt.Sprintf("%d", ghUser.Id)
 
-		// Get Primary Email
-		emailResp, err := client.Get("https://api.github.com/user/emails")
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to get github emails")
-			return
-		}
-		defer emailResp.Body.Close()
+		providerID = fmt.Sprintf("%d", ghUser.ID)
+		email = ghUser.Email
 
-		var emails []struct {
-			Email   string `json:"email"`
-			Primary bool   `json:"primary"`
-		}
-		if err := json.NewDecoder(emailResp.Body).Decode(&emails); err == nil {
-			for _, e := range emails {
-				if e.Primary {
-					email = e.Email
-					break
+		// If email is private in GitHub profile, fetch from emails endpoint
+		if email == "" {
+			emailResp, err := client.Get("https://api.github.com/user/emails")
+			if err == nil {
+				defer emailResp.Body.Close()
+				var emails []struct {
+					Email    string `json:"email"`
+					Primary  bool   `json:"primary"`
+					Verified bool   `json:"verified"`
+				}
+				if err := json.NewDecoder(emailResp.Body).Decode(&emails); err == nil {
+					for _, e := range emails {
+						if e.Primary && e.Verified {
+							email = e.Email
+							break
+						}
+					}
+					if email == "" && len(emails) > 0 {
+						email = emails[0].Email
+					}
 				}
 			}
 		}
 	}
 
-	if email == "" || providerID == "" {
-		writeErr(w, http.StatusBadRequest, "failed to extract email or id from provider")
+	if email == "" {
+		writeErr(w, http.StatusBadRequest, "unable to retrieve verified email from provider")
 		return
 	}
 
@@ -195,22 +234,26 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
 	// Set refresh token in HTTP-only cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    tokens.RefreshToken,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
-		SameSite: http.SameSiteStrictMode,
+		Secure:   isHTTPS,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   7 * 24 * 60 * 60, // 7 days
 	})
 
-	// Redirect to frontend where the auth interceptor will automatically refresh token
-	// Read frontend origins to find the correct redirect URL, default to localhost:5173
-	redirectURL := "http://localhost:5173"
-	if s.cfg.FrontendOrigins != nil && len(s.cfg.FrontendOrigins) > 0 {
-		redirectURL = s.cfg.FrontendOrigins[0]
+	// Redirect to frontend root where the auth interceptor will automatically refresh token
+	redirectURL := "/"
+	if len(s.cfg.FrontendOrigins) > 0 {
+		first := s.cfg.FrontendOrigins[0]
+		if first != "*" && (strings.HasPrefix(first, "http://") || strings.HasPrefix(first, "https://")) {
+			redirectURL = first
+		}
 	}
 	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
