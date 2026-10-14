@@ -1,0 +1,91 @@
+# ==============================================================================
+# Render Blueprint Configuration (render.yaml)
+# https://render.com/docs/blueprint-spec
+# ==============================================================================
+# Deploy Aegix AI Kernel Security System as a Docker Web Service on Render.
+# This single blueprint launches the Go API, WebSocket stream, and React dashboard.
+# ==============================================================================
+
+services:
+  - type: web
+    name: aegix-security
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # Render dynamically assigns PORT (usually 10000)
+      - key: PORT
+        value: 10000
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: API_LOG_LEVEL
+        value: info
+
+      # Allow all origins or specify your custom Render frontend URL
+      - key: FRONTEND_ORIGINS
+        value: "*"
+
+      # Auth & Sessions
+      - key: SESSION_MODE
+        value: "true"
+      - key: SESSION_TTL
+        value: "3600"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
+
+      # Kernel Monitor (Disabled on cloud container runtimes without eBPF privileges)
+      - key: KERNEL_MONITOR_OWNER
+        value: disabled
+
+      # Storage (SQLite in /tmp or attach a Render Disk)
+      - key: DB_PATH
+        value: /tmp/events.db
+
+      # Cold Store Database (Optional: Connect Render PostgreSQL or Neon / Supabase)
+      - key: DATABASE_URL
+        sync: false
+
+      # AI Engines (Groq for Tier C & Prompt Guard, Gemini for Chat)
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_CHAT_MODEL
+        value: gemini-flash-latest
+
+      # Tier B.5 Prompt Guard Semantic Layer
+      - key: PROMPT_GUARD_ENABLED
+        value: "true"
+      - key: PROMPT_GUARD_MODEL
+        value: meta-llama/llama-prompt-guard-2-86m
+      - key: PROMPT_GUARD_THRESHOLD
+        value: "0.90"
+      - key: PROMPT_GUARD_TIMEOUT_SECONDS
+        value: "3"
+
+      # Email Notifications (Optional Gmail App Password)
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: GMAIL_FROM_EMAIL
+        sync: false
+      - key: DEPARTMENT_EMAILS
+        value: '{"SOC Operations":"soc@company.com","Security Engineering":"security@company.com"}'
+
+      # OAuth Providers (Optional)
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false

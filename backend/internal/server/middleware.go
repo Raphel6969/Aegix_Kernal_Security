@@ -55,12 +55,15 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // ── CORS Middleware ───────────────────────────────────────────────────────────
 
-// corsMiddleware handles CORS headers and OPTIONS preflight requests.
-// allowedOrigins is a list of exact origins to permit (e.g. "http://localhost:5173").
 func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowAll := false
 	originSet := make(map[string]bool, len(allowedOrigins))
 	for _, o := range allowedOrigins {
-		originSet[strings.TrimSuffix(o, "/")] = true
+		trimmed := strings.TrimSpace(strings.TrimSuffix(o, "/"))
+		if trimmed == "*" {
+			allowAll = true
+		}
+		originSet[trimmed] = true
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -68,10 +71,13 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 			origin := r.Header.Get("Origin")
 
 			// Allow configured origins or fall back to * in dev.
-			if originSet[origin] {
+			if origin != "" && (allowAll || originSet[origin]) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Vary", "Origin")
-			} else if len(allowedOrigins) == 0 {
+			} else if originSet[origin] {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+			} else if len(allowedOrigins) == 0 || allowAll {
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 			}
 

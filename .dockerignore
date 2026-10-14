@@ -1,13 +1,42 @@
+# Node dependencies & outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.npm/
+
+# Go build artifacts & binaries
+backend/aegix.exe
+backend/aegix
+*.exe
+*.test
+*.out
+backend/bin/
+backend/vendor/
+
+# Databases & logs
+data/*.db
+data/postgres/
+*.sqlite3
+*.db
+logs/
+*.log
+
+# Python leftovers
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .venv/
 venv/
+backend_py_backup/
+
+# Environment files
 .env
 .env.local
-.build/
-.dist/
-node_modules/
-*.sqlite3
-data/events.db
+
+# Git & IDEs
+.git/
+.github/
+.vscode/
+.idea/

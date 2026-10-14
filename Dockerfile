@@ -1,51 +1,63 @@
-# Dockerfile for Aegix security backend/dashboard.
-# Hugging Face Docker Spaces expose app_port 7860 by default.
-FROM node:20-slim AS frontend-builder
+# ==============================================================================
+# Multi-stage Dockerfile for Aegix AI Kernel Security System
+# Production all-in-one container for Render, Railway, Docker, or standalone.
+# Hosts the Go backend API, WebSocket server, and static React dashboard SPA.
+# ==============================================================================
 
+# ── Stage 1: Build React Dashboard ──────────────────────────────────────────
+FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
-ARG VITE_API_URL
-ENV VITE_API_URL=${VITE_API_URL}
 
-# Build the React frontend inside the image so clean checkouts work everywhere.
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci || npm install
 
 COPY frontend/ ./
+ARG VITE_API_URL=""
+ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
-FROM python:3.11-slim
+# ── Stage 2: Build Go Backend Binary ────────────────────────────────────────
+FROM golang:alpine AS backend-builder
+WORKDIR /app/backend
+
+RUN apk add --no-cache git
+
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+
+COPY backend/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/aegix ./cmd/aegix
+
+# ── Stage 3: Minimal Production Alpine Runtime ──────────────────────────────
+FROM alpine:latest
+
+# Install TLS certificates (for Groq, Gemini, Gmail, OAuth) and curl for healthcheck
+RUN apk add --no-cache ca-certificates tzdata curl
 
 WORKDIR /app
 
-# Install system dependencies needed for the backend runtime.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Copy compiled binary
+COPY --from=backend-builder /app/aegix /usr/local/bin/aegix
 
-# Install backend dependencies first for better cache reuse.
-COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt
+# Copy built frontend assets (served natively by Go Chi backend)
+COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
-# Copy backend source and training data before building the trained model artifact.
-COPY backend/ /app/backend/
+# Copy seed / training data
 COPY data/ /app/data/
 
-# Train the ML model during image build so deployments include the artifact.
-RUN python backend/models/train_model.py
-
-# Copy the built frontend bundle from the build stage.
-COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
-COPY README.md /app/README.md
-
-ENV PYTHONUNBUFFERED=1
-ENV PORT=7860
+# Default Environment
 ENV API_HOST=0.0.0.0
-ENV API_PORT=7860
-ENV KERNEL_MONITOR_OWNER=disabled
-ENV DB_PATH=/tmp/aegix/events.db
-ENV EVENT_CACHE_SIZE=1000
+ENV PORT=8000
+ENV API_PORT=8000
+ENV API_LOG_LEVEL=info
+ENV DB_PATH=/app/data/events.db
+ENV FRONTEND_DIST=/app/frontend/dist
 
-EXPOSE 7860
+# Expose ports (8000 for standard, 10000 for Render default)
+EXPOSE 8000 10000
 
-CMD ["sh", "-c", "uvicorn backend.app:app --host 0.0.0.0 --port ${PORT:-7860}"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-8000}/healthz || exit 1
+
+CMD ["aegix"]

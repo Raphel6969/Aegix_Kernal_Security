@@ -1,0 +1,17 @@
+# Go binaries and build artifacts
+aegix
+aegix.exe
+*.exe
+*.test
+*.out
+bin/
+vendor/
+
+# Local database files
+*.db
+*.sqlite3
+
+# Git and logs
+.git
+.github
+*.log

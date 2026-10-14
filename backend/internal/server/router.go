@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,90 +33,19 @@ func NewRouter(s *Server, cfg *config.Settings) http.Handler {
 	r.Use(corsMiddleware(cfg.FrontendOrigins))
 	r.Use(rateLimiter(200, time.Minute)) // 200 req/min per IP
 
-	// ── Infrastructure ─────────────────────────────────────────────────────────
-	r.Get("/healthz", s.handleHealthz)
-	r.Get("/readyz", s.handleReadyz)
-
 	// ── API Documentation (Swagger) ────────────────────────────────────────────
 	r.Get("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL("/api/swagger/doc.json"), // NGINX routes /api to /
+		httpSwagger.URL("/swagger/doc.json"),
+	))
+	r.Get("/api/swagger/*", httpSwagger.Handler(
+		httpSwagger.URL("/api/swagger/doc.json"),
 	))
 
-	// ── Session ────────────────────────────────────────────────────────────────
-	r.Get("/session", s.handleGetSession)
-
-	// ── WebSocket ──────────────────────────────────────────────────────────────
-	r.Get("/ws", s.handleWebSocket)
-
-	// ── Command Analysis ───────────────────────────────────────────────────────
-	// POST /analyze          → Python: POST /analyze
-	// POST /analyze/llm-explain → Python: POST /analyze/llm-explain (Phase 4)
-	r.Post("/analyze", s.handleAnalyze)
-	r.Post("/analyze/llm-explain", s.handleAnalyzeLLMExplain)
-
-	// ── Agent Event Ingestion ──────────────────────────────────────────────────
-	// POST /agent/events     → Python: POST /agent/events
-	r.Post("/agent/events", s.handleAgentEvents)
-
-	// ── Event History ──────────────────────────────────────────────────────────
-	// GET  /events           → Python: GET /events
-	// DELETE /events         → Python: DELETE /events
-	// GET  /events/{id}      → Python: GET /events/{event_id}
-	// GET  /events/{id}/explain      → Python: GET /events/{event_id}/explain
-	// POST /events/{id}/llm-explain  → Python: POST /events/{event_id}/llm-explain (Phase 4)
-	r.Get("/events", s.handleGetEvents)
-	r.Delete("/events", s.handleClearEvents)
-	r.Get("/events/{id}", s.handleGetEvent)
-	r.Get("/events/{id}/explain", s.handleGetEventExplain)
-	r.Post("/events/{id}/llm-explain", s.handleEventLLMExplain)
-
-	// ── Statistics ─────────────────────────────────────────────────────────────
-	// GET /stats             → Python: GET /stats
-	r.Get("/stats", s.handleGetStats)
-
-	// ── Settings ───────────────────────────────────────────────────────────────
-	// GET  /settings/thresholds   → Python: GET /settings/thresholds
-	// POST /settings/thresholds   → Python: POST /settings/thresholds
-	// GET  /settings/remediation  → Python: GET /settings/remediation
-	// POST /settings/remediation  → Python: POST /settings/remediation
-	// POST /settings/remediation/test → Python: POST /settings/remediation/test (Phase 5)
-	r.Get("/settings/thresholds", s.handleGetThresholds)
-	r.Post("/settings/thresholds", s.handlePostThresholds)
-	r.Get("/settings/remediation", s.handleGetRemediation)
-	r.Post("/settings/remediation", s.handlePostRemediation)
-	r.Post("/settings/remediation/test", s.handleRemediationTest)
-
-	// ── Webhooks (Phase 4) ─────────────────────────────────────────────────────
-	r.Get("/webhooks", s.handleGetWebhooks)
-	r.Post("/webhooks", s.handlePostWebhook)
-	r.Delete("/webhooks/{id}", s.handleDeleteWebhook)
-
-	// ── Authentication (Phase 5 & 6) ───────────────────────────────────────────
-	r.Post("/auth/register", s.handleRegister)
-	r.Post("/auth/login", s.handleLogin)
-	r.Post("/auth/refresh", s.handleRefresh)
-	r.Post("/auth/logout", s.handleLogout)
-	r.Get("/auth/{provider}/login", s.handleOAuthLogin)
-	r.Get("/auth/{provider}/callback", s.handleOAuthCallback)
-
-	// ── Alert History (Phase 4) ────────────────────────────────────────────────
-	r.Get("/alerts/history", s.handleGetAlertHistory)
-
-	// ── Notifications (Phase 4) ────────────────────────────────────────────────
-	r.Get("/notifications", s.handleGetNotifications)
-	r.Post("/notifications", s.handlePostNotification)
-	r.Post("/notifications/read-all", s.handleMarkAllNotificationsRead)
-	r.Post("/notifications/{id}/read", s.handleMarkNotificationRead)
-	r.Delete("/notifications/{id}", s.handleDeleteNotification)
-	r.Delete("/notifications", s.handleClearNotifications)
-
-	// ── Reports (Phase 4) ─────────────────────────────────────────────────────
-	r.Get("/reports/departments", s.handleGetDepartments)
-	r.Post("/reports/departments", s.handlePostDepartments)
-	r.Post("/reports/email", s.handleSendEmailReport)
-
-	// ── Chat (Phase 4) ────────────────────────────────────────────────────────
-	r.Post("/chat", s.handleChat)
+	// ── Register API Routes at root AND under /api prefix ──────────────────────
+	registerAPIRoutes(r, s)
+	r.Route("/api", func(api chi.Router) {
+		registerAPIRoutes(api, s)
+	})
 
 	// ── Static Frontend ───────────────────────────────────────────────────────
 	// If frontend/dist/ exists, serve the React SPA.
@@ -125,19 +55,90 @@ func NewRouter(s *Server, cfg *config.Settings) http.Handler {
 	return r
 }
 
+// registerAPIRoutes mounts all backend services onto a Chi router.
+func registerAPIRoutes(r chi.Router, s *Server) {
+	// Infrastructure
+	r.Get("/healthz", s.handleHealthz)
+	r.Get("/readyz", s.handleReadyz)
+
+	// Session
+	r.Get("/session", s.handleGetSession)
+
+	// WebSocket
+	r.Get("/ws", s.handleWebSocket)
+
+	// Command Analysis
+	r.Post("/analyze", s.handleAnalyze)
+	r.Post("/analyze/llm-explain", s.handleAnalyzeLLMExplain)
+
+	// Agent Event Ingestion
+	r.Post("/agent/events", s.handleAgentEvents)
+
+	// Event History
+	r.Get("/events", s.handleGetEvents)
+	r.Delete("/events", s.handleClearEvents)
+	r.Get("/events/{id}", s.handleGetEvent)
+	r.Get("/events/{id}/explain", s.handleGetEventExplain)
+	r.Post("/events/{id}/llm-explain", s.handleEventLLMExplain)
+
+	// Statistics
+	r.Get("/stats", s.handleGetStats)
+
+	// Settings & Remediation
+	r.Get("/settings/thresholds", s.handleGetThresholds)
+	r.Post("/settings/thresholds", s.handlePostThresholds)
+	r.Get("/settings/remediation", s.handleGetRemediation)
+	r.Post("/settings/remediation", s.handlePostRemediation)
+	r.Post("/settings/remediation/test", s.handleRemediationTest)
+
+	// Webhooks
+	r.Get("/webhooks", s.handleGetWebhooks)
+	r.Post("/webhooks", s.handlePostWebhook)
+	r.Delete("/webhooks/{id}", s.handleDeleteWebhook)
+
+	// Authentication
+	r.Post("/auth/register", s.handleRegister)
+	r.Post("/auth/login", s.handleLogin)
+	r.Post("/auth/refresh", s.handleRefresh)
+	r.Post("/auth/logout", s.handleLogout)
+	r.Get("/auth/{provider}/login", s.handleOAuthLogin)
+	r.Get("/auth/{provider}/callback", s.handleOAuthCallback)
+
+	// Alerts & Notifications
+	r.Get("/alerts/history", s.handleGetAlertHistory)
+	r.Get("/notifications", s.handleGetNotifications)
+	r.Post("/notifications", s.handlePostNotification)
+	r.Post("/notifications/read-all", s.handleMarkAllNotificationsRead)
+	r.Post("/notifications/{id}/read", s.handleMarkNotificationRead)
+	r.Delete("/notifications/{id}", s.handleDeleteNotification)
+	r.Delete("/notifications", s.handleClearNotifications)
+
+	// Reports
+	r.Get("/reports/departments", s.handleGetDepartments)
+	r.Post("/reports/departments", s.handlePostDepartments)
+	r.Post("/reports/email", s.handleSendEmailReport)
+
+	// Chat
+	r.Post("/chat", s.handleChat)
+}
+
 // mountFrontend serves the React build output if it exists, otherwise
 // serves a minimal API info page at /.
 func mountFrontend(r *chi.Mux, cfg *config.Settings) {
-	// Resolve frontend/dist relative to the module root (two directories
-	// above the backend binary).
+	// Candidate directories to locate frontend/dist
 	candidates := []string{
+		os.Getenv("FRONTEND_DIST"),
+		"/app/frontend/dist",
+		filepath.Join("frontend", "dist"),
 		filepath.Join("..", "frontend", "dist"),
 		filepath.Join("..", "..", "frontend", "dist"),
-		"frontend/dist",
 	}
 
 	var distDir string
 	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
 		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
 			distDir = c
 			break
@@ -154,6 +155,12 @@ func mountFrontend(r *chi.Mux, cfg *config.Settings) {
 	fsys := os.DirFS(distDir)
 
 	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Do not intercept API or swagger requests that fell through
+		if strings.HasPrefix(req.URL.Path, "/api/") || strings.HasPrefix(req.URL.Path, "/swagger/") {
+			http.NotFound(w, req)
+			return
+		}
+
 		// Try to serve the file directly.
 		name := req.URL.Path
 		if name == "/" {
@@ -166,7 +173,7 @@ func mountFrontend(r *chi.Mux, cfg *config.Settings) {
 			return
 		}
 
-		// SPA fallback: serve index.html for unknown paths.
+		// SPA fallback: serve index.html for client-side routing.
 		indexData, err := fs.ReadFile(fsys, "index.html")
 		if err != nil {
 			http.NotFound(w, req)

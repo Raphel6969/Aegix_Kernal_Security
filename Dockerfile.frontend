@@ -4,13 +4,15 @@ WORKDIR /app
 
 # Install dependencies
 COPY package.json package-lock.json ./
-RUN npm install
+RUN npm ci || npm install
+
+# Build arguments for Vite
+ARG VITE_API_URL=""
+ENV VITE_API_URL=${VITE_API_URL}
 
 # Copy source and build
 COPY . .
 RUN npm run build
 
-# Serve statically (in production we'd use NGINX here too, but since we have a global API gateway,
-# we can just use a simple static server, or run Vite preview)
 EXPOSE 5173
 CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "5173"]

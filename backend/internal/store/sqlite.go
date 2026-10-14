@@ -157,7 +157,7 @@ func (s *SQLiteStore) Append(event *model.SecurityEvent) error {
 			?,?,?,
 			?,?,?,
 			?,?,
-			?,?
+			?,?,
 			?,?,?
 		)`,
 		rowID, event.ID,

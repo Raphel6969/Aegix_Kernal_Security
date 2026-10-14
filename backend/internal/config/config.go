@@ -94,7 +94,7 @@ func Load() *Settings {
 
 	s := &Settings{
 		APIHost:     env("API_HOST", "0.0.0.0"),
-		APIPort:     envInt("API_PORT", 8000),
+		APIPort:     envInt("PORT", envInt("API_PORT", 8000)),
 		APILogLevel: env("API_LOG_LEVEL", "info"),
 
 		FrontendOrigins: parseCSV(env(
@@ -215,16 +215,33 @@ func parseCSV(s string) []string {
 }
 
 // resolveDBPath turns a raw path (possibly empty or relative) into an absolute
-// path, defaulting to <project-root>/data/events.db.
+// path, defaulting to a sensible local or container path.
 func resolveDBPath(raw string) string {
-	if raw == "" {
-		raw = filepath.Join(projectRoot(), "data", "events.db")
+	if raw != "" {
+		abs, err := filepath.Abs(raw)
+		if err != nil {
+			return raw
+		}
+		return abs
 	}
-	abs, err := filepath.Abs(raw)
-	if err != nil {
-		return raw
+
+	// Check container / standard candidate locations
+	candidates := []string{
+		"/app/data/events.db",
+		"data/events.db",
+		filepath.Join(projectRoot(), "data", "events.db"),
 	}
-	return abs
+	for _, c := range candidates {
+		dir := filepath.Dir(c)
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			abs, err := filepath.Abs(c)
+			if err == nil {
+				return abs
+			}
+		}
+	}
+
+	return filepath.Join(projectRoot(), "data", "events.db")
 }
 
 // projectRoot walks up from the current file's location to find the repo root.
