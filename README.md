@@ -124,42 +124,75 @@ Incoming Process / Command Execution
 
 ---
 
-## 🚀 Render Cloud Deployment
+## 🚀 100% Free Cloud Deployment Guide
 
-AEGIX is fully containerized and production-ready for **[Render](https://render.com/)**. You can run the entire stack (Go backend API, WebSocket engine, and React dashboard SPA) in a **single lightweight container** that fits seamlessly within Render's free or starter tiers.
+AEGIX is fully containerized with a production multi-stage Docker build. The combined Go API, WebSocket server, and React dashboard run together inside **under 35MB of RAM**, making it fit easily within free cloud tiers without needing paid Blueprints or credit cards.
 
-### Option 1: 1-Click Blueprint (Recommended)
+---
 
-1. Fork or push this repository to your GitHub account.
-2. In the Render Dashboard, click **New +** → **Blueprint**.
-3. Select your repository. Render automatically reads [`render.yaml`](render.yaml) and configures the service.
-4. Fill in any desired optional API keys (`GROQ_API_KEY`, `GEMINI_API_KEY`, `DATABASE_URL`) or click **Apply**.
-5. Your instance will build and deploy automatically at `https://<your-service>.onrender.com`!
+### Method 1: Render Free Web Service ($0 / 100% Free)
 
-### Option 2: Manual Web Service on Render
+You do **NOT** need the paid Render Blueprint feature. You can deploy directly as a free Web Service:
 
-If you prefer setting up manually without Blueprints:
-
-1. In Render, click **New +** → **Web Service**.
-2. Connect your Git repository.
-3. Configure the following settings:
-   - **Environment / Runtime**: `Docker`
+1. Log in to [dashboard.render.com](https://dashboard.render.com/).
+2. Click **New +** → **Web Service** (do *not* select Blueprint).
+3. Connect your GitHub repository: `https://github.com/Raphel6969/Aegix_Kernal_Security.git`.
+4. Render will detect the repository. Configure the following fields:
+   - **Name**: `aegix-security` (or any name you like)
+   - **Region**: Any (e.g. *Oregon, US* or *Frankfurt, EU*)
+   - **Branch**: `main`
+   - **Runtime**: `Docker`
    - **Dockerfile Path**: `./Dockerfile`
    - **Docker Context**: `.`
-   - **Health Check Path**: `/healthz`
-4. Add Environment Variables:
-   | Variable | Value | Description |
+   - **Instance Type**: Select **Free ($0/month)**
+5. Expand **Advanced** → **Add Environment Variable**:
+   | Key | Value | Notes |
    |:---|:---|:---|
-   | `PORT` | `10000` | Render's default web service port |
-   | `API_HOST` | `0.0.0.0` | Bind address |
-   | `FRONTEND_ORIGINS` | `*` | Allows browser communication |
-   | `SESSION_MODE` | `true` | Enables authenticated session tokens |
-   | `KERNEL_MONITOR_OWNER`| `disabled` | Containers run in API/heuristic mode |
-   | `DB_PATH` | `/tmp/events.db` | High-speed temporary SQLite cache |
-   | `GROQ_API_KEY` | *(optional)* | Tier C explanation & Prompt Guard |
-   | `GEMINI_API_KEY` | *(optional)* | Interactive AI Security Copilot chat |
-   | `DATABASE_URL` | *(optional)* | PostgreSQL connection string |
-5. Click **Create Web Service**. Within ~2 minutes, your live security dashboard and API will be active.
+   | `PORT` | `10000` | Render default web port |
+   | `API_HOST` | `0.0.0.0` | Listen on all interfaces |
+   | `FRONTEND_ORIGINS` | `*` | Allows browser cross-origin requests |
+   | `SESSION_MODE` | `true` | Enables session auth |
+   | `KERNEL_MONITOR_OWNER` | `disabled` | Run in container API mode |
+   | `DB_PATH` | `/tmp/events.db` | High-speed temporary SQLite store |
+   | `GROQ_API_KEY` | *your_key* | *(Optional)* For AI explanations |
+   | `GEMINI_API_KEY` | *your_key* | *(Optional)* For Security Copilot |
+   | `DATABASE_URL` | *postgres_url* | *(Optional)* Supabase / Neon / Render Postgres |
+6. Set **Health Check Path** to `/healthz`.
+7. Click **Create Web Service**. Render will build and launch your live application at:
+   `https://<your-service-name>.onrender.com`
+
+---
+
+### Method 2: Koyeb (Always-On Free Nano Service)
+
+[Koyeb](https://www.koyeb.com/) offers a 100% free nano service that **does not sleep**:
+
+1. Sign up on [Koyeb](https://app.koyeb.com/).
+2. Click **Create Service** → **GitHub**.
+3. Select your repository `Aegix_Kernal_Security`.
+4. Choose **Dockerfile** builder.
+5. Set port to `8000` (Protocol: HTTP).
+6. Set environment variables (`FRONTEND_ORIGINS=*`, `KERNEL_MONITOR_OWNER=disabled`, `DB_PATH=/tmp/events.db`).
+7. Click **Deploy**.
+
+---
+
+### Method 3: Hugging Face Spaces (16 GB Free RAM)
+
+1. Create a new Space on [Hugging Face Spaces](https://huggingface.co/spaces).
+2. Choose **Docker** as the SDK (Blank).
+3. Push or clone this repository to the space.
+4. Set Secret / Env `PORT=7860`.
+5. Hugging Face automatically exposes your dashboard with 16GB RAM for free.
+
+---
+
+### Method 4: Render Blueprint (Paid / Team Accounts)
+
+If you have a Render paid plan or team account, you can use the automated blueprint:
+1. Click **New +** → **Blueprint**.
+2. Select your repository; Render reads [`render.yaml`](render.yaml) automatically.
+3. Click **Apply** to deploy.
 
 ---
 
