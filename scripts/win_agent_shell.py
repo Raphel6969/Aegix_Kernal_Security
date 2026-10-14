@@ -29,7 +29,9 @@ def print_banner():
 def main():
     print_banner()
 
-    backend_url = "http://localhost:8000"
+    default_backend = os.getenv("BACKEND_URL", "https://aegix-kernal-security.onrender.com")
+    entered_backend = input(f"Backend URL (default: {default_backend}): ").strip()
+    backend_url = (entered_backend or default_backend).rstrip("/")
     
     print("To show events in your browser dashboard, enter your Session Token.")
     print("You can copy it from the 'System Settings' tab in the web UI.")

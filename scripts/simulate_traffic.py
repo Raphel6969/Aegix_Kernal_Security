@@ -8,10 +8,8 @@ import os
 # Add parent directory to path so we can import backend modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.config import get_settings
-
-settings = get_settings()
-API_URL = f"{settings.backend_url}/analyze"
+DEFAULT_BACKEND = os.getenv("BACKEND_URL", "https://aegix-kernal-security.onrender.com")
+API_URL = os.getenv("API_URL", f"{DEFAULT_BACKEND}/analyze")
 
 COMMANDS = [
     # --- SAFE COMMANDS ---

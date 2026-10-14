@@ -51,7 +51,9 @@ def main():
 =========================================================
 """)
 
-    backend_url = "http://localhost:8000"
+    default_backend = os.getenv("BACKEND_URL", "https://aegix-kernal-security.onrender.com")
+    entered_backend = input(f"Backend URL (default: {default_backend}): ").strip()
+    backend_url = (entered_backend or default_backend).rstrip("/")
     
     print("To link this test stream to your browser dashboard:")
     session_token = input("Enter Session Token (optional, press Enter to skip): ").strip()
