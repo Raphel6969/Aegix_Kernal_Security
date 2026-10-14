@@ -81,7 +81,12 @@ export function useWebSocket(sessionToken?: string) {
       if (!sessionToken) {
         return;
       }
-      const wsUrl = new URL(WS_URL);
+      let wsTarget = WS_URL;
+      if (!wsTarget.startsWith('ws://') && !wsTarget.startsWith('wss://')) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsTarget = `${protocol}//${window.location.host}${wsTarget.startsWith('/') ? '' : '/'}${wsTarget}`;
+      }
+      const wsUrl = new URL(wsTarget);
       if (sessionToken) wsUrl.searchParams.set('session_token', sessionToken);
       const socket = new WebSocket(wsUrl.toString());
       socketRef.current = socket;
