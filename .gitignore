@@ -53,7 +53,8 @@ build/
 *.pkl
 *.o
 *.so
-*.mod
+!go.mod
+!**/go.mod
 .vscode/
 .idea/
 *.swp
